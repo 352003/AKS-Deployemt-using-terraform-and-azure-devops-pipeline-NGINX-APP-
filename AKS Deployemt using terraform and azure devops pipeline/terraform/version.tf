@@ -1,0 +1,17 @@
+terraform {
+  required_version = ">= 1.2.0"
+ 
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 4.70.0"
+    }
+  }
+ 
+  backend "azurerm" {}
+}
+ 
+provider "azurerm" {
+  features {}
+  skip_provider_registration=true
+}

@@ -1,0 +1,149 @@
+trigger:
+  branches:
+    include:
+      - none
+ 
+variables:
+- group: TerraformConfig
+ 
+- name: terraformVersion
+  value: '1.6.6'
+ 
+- name: azureServiceConnection
+  value: 'srv-con-aks'
+ 
+- name: workingDirectory
+  value: '$(System.DefaultWorkingDirectory)/terraform'
+ 
+# =====================================
+# STAGE 1: TERRAFORM PLAN
+# =====================================
+stages:
+- stage: TerraformPlan
+  displayName: Terraform Plan
+ 
+  jobs:
+  - job: PlanJob
+    pool:
+      vmImage: ubuntu-latest
+ 
+    steps:
+    - checkout: self
+ 
+    - task: TerraformInstaller@1
+      inputs:
+        terraformVersion: $(terraformVersion)
+ 
+    - task: TerraformTaskV4@4
+      displayName: Terraform Init
+      inputs:
+        provider: azurerm
+        command: init
+        workingDirectory: $(workingDirectory)
+        backendServiceArm: $(azureServiceConnection)
+        backendAzureRmResourceGroupName: $(backendRG)
+        backendAzureRmStorageAccountName: $(backendStorage)
+        backendAzureRmContainerName: $(backendContainer)
+        backendAzureRmKey: $(backendKey)
+ 
+    - task: TerraformTaskV4@4
+      displayName: Terraform Plan
+      inputs:
+        provider: azurerm
+        command: plan
+        workingDirectory: $(workingDirectory)
+        environmentServiceNameAzureRM: $(azureServiceConnection)
+ 
+# =====================================
+# STAGE 2: APPLY + AKS DEPLOY (APPROVAL)
+# =====================================
+- stage: TerraformApply
+  displayName: Terraform Apply & Deploy
+  dependsOn: TerraformPlan
+ 
+  jobs:
+  - deployment: ApplyJob
+    environment: 'approve'
+ 
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+ 
+          - checkout: self
+ 
+          - task: TerraformInstaller@1
+            inputs:
+              terraformVersion: $(terraformVersion)
+ 
+          - task: TerraformTaskV4@4
+            displayName: Terraform Init
+            inputs:
+              provider: azurerm
+              command: init
+              workingDirectory: $(workingDirectory)
+              backendServiceArm: $(azureServiceConnection)
+              backendAzureRmResourceGroupName: $(backendRG)
+              backendAzureRmStorageAccountName: $(backendStorage)
+              backendAzureRmContainerName: $(backendContainer)
+              backendAzureRmKey: $(backendKey)
+ 
+          - task: TerraformTaskV4@4
+            displayName: Terraform Apply
+            inputs:
+              provider: azurerm
+              command: apply
+              workingDirectory: $(workingDirectory)
+              environmentServiceNameAzureRM: $(azureServiceConnection)
+              commandOptions: '-auto-approve'
+ 
+          # Deploy Kubernetes YAML
+          - script: |
+              az aks get-credentials --resource-group rg-aks-dev --name aks-dev-cluster --overwrite-existing
+              kubectl apply -f terraform/k8s/
+            displayName: Deploy to AKS
+ 
+# =====================================
+# STAGE 3: DESTROY (APPROVAL)
+# =====================================
+- stage: TerraformDestroy
+  displayName: Terraform Destroy
+  dependsOn: []
+  condition: always()
+ 
+  jobs:
+  - deployment: DestroyJob
+    environment: 'approve'
+ 
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+ 
+          - checkout: self
+ 
+          - task: TerraformInstaller@1
+            inputs:
+              terraformVersion: $(terraformVersion)
+ 
+          - task: TerraformTaskV4@4
+            displayName: Terraform Init
+            inputs:
+              provider: azurerm
+              command: init
+              workingDirectory: $(workingDirectory)
+              backendServiceArm: $(azureServiceConnection)
+              backendAzureRmResourceGroupName: $(backendRG)
+              backendAzureRmStorageAccountName: $(backendStorage)
+              backendAzureRmContainerName: $(backendContainer)
+              backendAzureRmKey: $(backendKey)
+ 
+          - task: TerraformTaskV4@4
+            displayName: Terraform Destroy
+            inputs:
+              provider: azurerm
+              command: destroy
+              workingDirectory: $(workingDirectory)
+              environmentServiceNameAzureRM: $(azureServiceConnection)
+              commandOptions: '-auto-approve'
+ 
